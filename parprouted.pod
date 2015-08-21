@@ -25,13 +25,17 @@ to route the packets to the destination host when it receives it and you will
 not have to care about setting routing/subnetting manually. All routes
 entered by the daemon will have a metric of 50. 
 
+Unless you use B<-p> switch, all entries in the ARP table will be
+refreshed (rechecked by sending ARP requests) every 50 seconds. This
+keeps them from being expired by kernel.
+
 It takes about 3-5 seconds for a bridge to update all its tables and
 start sending packets to the destination. So, for example, if you have
 two bridges, the bridging time can be up to 10 seconds. However
 afterwards ARP entries are in the tables and there will be no delay
 until they time out.
 
-=head1 PREREQUISITES
+=head1 REQUIREMENTS
 
 parprouted requires "ip" program form iproute2 tools to be installed in 
 /sbin. If it is installed in another location, please replace "/sbin/ip" 
@@ -48,9 +52,14 @@ will do.
 The list of interfaces to do bridging on should be given via the command
 line.
 
-The daemon accepts switch B<-d>, which stands for debugging. If you
-run it in debugging mode the daemon will go to background and will print
-additional debugging information to stdout/stderr.
+The daemon accepts the following switches:
+
+B<-d>, which stands for debugging. If you run it in debugging mode the daemon 
+will go to background and will print additional debugging information to 
+stdout/stderr.
+
+B<-p>, which makes all ARP entries to be permanent. This will also
+result in that ARP tables will not be refreshed by ARP pings.
 
 =head1 EXAMPLE
 

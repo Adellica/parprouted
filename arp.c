@@ -54,6 +54,8 @@ void arp_recv(int sock, ether_arp_frame *frame)
   recvfrom(sock, frame, sizeof(ether_arp_frame), 0, NULL, 0);
 }
 
+/* Send ARP is-at reply */
+
 void arp_reply(int sock, ether_arp_frame *frame, struct sockaddr_ll *ifs) 
 {
   struct ether_arp *arp = &frame->arp;
@@ -74,6 +76,8 @@ void arp_reply(int sock, ether_arp_frame *frame, struct sockaddr_ll *ifs)
   sendto(sock, frame, sizeof(ether_arp_frame), 0, 
 	 (struct sockaddr *)ifs, sizeof(struct sockaddr_ll));
 }
+
+/* Send ARP who-has request */
 
 void arp_req(char *ifname, struct in_addr remaddr)
 {
@@ -165,6 +169,19 @@ void send_dummy_udp(char *ifname, u_int32_t remaddr) {
     close(sock);
 }
 
+/* ARP ping all entries in the table */
+
+void refresharp(ARPTAB_ENTRY *list)
+{
+  if (debug) 
+      printf("Refreshing ARP entries.\n");
+      
+  while(list != NULL) {
+    arp_req(list->ifname, list->ipaddr_ia);
+    list = list->next;
+  }
+}
+
 void *arp(void *ifname) 
 {
   int sock,i;
@@ -234,7 +251,9 @@ void *arp(void *ifname)
 	  
           k_arpreq.arp_ha.sa_family = ARPHRD_ETHER;
           memcpy(&k_arpreq.arp_ha.sa_data, &frame.arp.arp_sha, sizeof(frame.arp.arp_sha));
-	  k_arpreq.arp_flags = ATF_COM | ATF_PERM;
+	  k_arpreq.arp_flags = ATF_COM;
+	  if (option_arpperm)
+	      k_arpreq.arp_flags = k_arpreq.arp_flags | ATF_PERM;
 	  strncpy(k_arpreq.arp_dev, ifname, sizeof(k_arpreq.arp_dev));
 
 	  k_arpreq.arp_pa.sa_family = AF_INET;

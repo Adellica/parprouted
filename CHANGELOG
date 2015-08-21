@@ -1,3 +1,10 @@
+Sun 07 Jul 2002 10:20:16 PM EEST
+
+parprbridge 0.4:
+refresh ARP entries by ARP pinging them. Or make permanent ARP
+entries if "-p" switch is given.
+
+------------------------------------------------------------------------
 Sun 07 Jul 2002 12:51:36 AM EEST
 
 parpbridge 0.3:

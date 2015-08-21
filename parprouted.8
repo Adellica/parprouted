@@ -206,6 +206,10 @@ to route the packets to the destination host when it receives it and you will
 not have to care about setting routing/subnetting manually. All routes
 entered by the daemon will have a metric of 50. 
 .PP
+Unless you use \fB\-p\fR switch, all entries in the ARP table will be
+refreshed (rechecked by sending ARP requests) every 50 seconds. This
+keeps them from being expired by kernel.
+.PP
 It takes about 3-5 seconds for a bridge to update all its tables and
 start sending packets to the destination. So, for example, if you have
 two bridges, the bridging time can be up to 10 seconds. However
@@ -225,9 +229,14 @@ will do.
 The list of interfaces to do bridging on should be given via the command
 line.
 .PP
-The daemon accepts switch \fB\-d\fR, which stands for debugging. If you
-run it in debugging mode the daemon will go to background and will print
-additional debugging information to stdout/stderr.
+The daemon accepts the following switches:
+.PP
+\fB\-d\fR, which stands for debugging. If you run it in debugging mode the daemon 
+will go to background and will print additional debugging information to 
+stdout/stderr.
+.PP
+\fB\-p\fR, which makes all ARP entries to be permanent. This will also
+result in that ARP tables will not be refreshed by ARP pings.
 .SH "EXAMPLE"
 To bridge between wlan0 and eth0: \fBparprouted eth0 wlan0\fR
 .SH "AUTHOR"

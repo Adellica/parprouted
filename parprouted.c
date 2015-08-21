@@ -21,6 +21,8 @@
 
 char *progname;
 int debug=0;
+int option_arpperm=0;
+
 char *errstr;
 
 pthread_t my_threads[MAX_IFACES+1];
@@ -166,7 +168,8 @@ void parseproc()
 	    if (item[strlen(item)-1] == '\n') { item[strlen(item)-1] = '\0'; }
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN) {
 		if (entry->route_added && !strcmp(item, entry->ifname))
-		    /* Remove route from kernel if it already exists */
+		    /* Remove route from kernel if it already exists through
+		       a different interface */
 		    entry->tstamp=0;
 		else 
 		    strncpy(entry->ifname, item, ARP_TABLE_ENTRY_LEN);
@@ -194,11 +197,14 @@ void parseproc()
 
 void cleanup() 
 {
-    int i=0;
+    /* FIXME: I think this is a wrong way to do it ... */
     
     syslog(LOG_INFO, "Received signal; cleaning up.");
+    /*
     for (i=0; i <= last_thread_idx; i++) {
+	pthread_cancel(my_threads[i]);
     }
+    */
     pthread_mutex_trylock(&arptab_mutex);
     processarp(1);
     syslog(LOG_INFO, "Terminating.");
@@ -207,11 +213,14 @@ void cleanup()
 
 void sighandler()
 {
+    /* FIXME: I think this is a wrong way to do it ... */
     pthread_exit(NULL);
 }
 
 void *main_thread()
 {
+    time_t last_refresh;
+
     signal(SIGINT, sighandler);
     signal(SIGTERM, sighandler);
     signal(SIGHUP, sighandler);
@@ -223,7 +232,11 @@ void *main_thread()
 	pthread_testcancel();
         parseproc();
         processarp(0);
-	sleep(SLEEPTIME);
+	usleep(SLEEPTIME);
+	if (!option_arpperm && time(NULL)-last_refresh > REFRESHTIME) {
+	    refresharp(*arptab);
+	    time(&last_refresh);
+	}
     }
     pthread_cleanup_pop(1);
 }
@@ -240,6 +253,10 @@ int main (int argc, char **argv)
 	    debug=1;
 	    help=0;
 	}
+	else if (!strcmp(argv[i],"-p")) { 
+	    option_arpperm=1;
+	    help=0;
+	}
 	else if (!strcmp(argv[i],"-h") || !strcmp(argv[i],"--help")) {
 	    break;
 	}
@@ -253,7 +270,7 @@ int main (int argc, char **argv)
     if (help || last_iface_idx <= -1) {
 	    printf("parprouted: proxy ARP routing daemon, version %s.\n", VERSION);
     	    printf("(C) 2002 Vladimir Ivaschenko <vi@maks.net>, GPL2 license.\n");
-	    printf("Usage: parprouted [-d] interface [interface]\n");
+	    printf("Usage: parprouted [-d] [-p] interface [interface]\n");
 	    exit(1);
     }
 
