@@ -1,0 +1,7 @@
+Sun 07 Jul 2002 12:51:36 AM EEST
+
+parpbridge 0.3:
+Critical bugfix. Previous parprouted failed in networks of any 
+considerable complexity. Almost complete rewrite. parprouted now is 
+multithreaded and does  everything in userspace (including ARP relaying,
+spoofing and listening). No need to set proxy_arp in kernel anymore. 

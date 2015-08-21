@@ -17,48 +17,26 @@
  * Boston, MA 02111-1307, USA.
  */
  
-#include <errno.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <signal.h>
-#include <syslog.h>
-#include <sys/wait.h>
-#include <string.h>
-#include <time.h>
-#include <stdlib.h>
-#include <assert.h>
-#include <libgen.h>
-
-#define PROC_ARP "/proc/net/arp"
-#define ARP_LINE_LEN 255
-#define ARP_TABLE_ENTRY_LEN 20
-#define ARP_TABLE_ENTRY_TIMEOUT 43200
-#define ROUTE_CMD_LEN 255
-#define SLEEPTIME 1
-
-#define VERSION "0.2"
+#include "parprouted.h"
 
 char *progname;
 int debug=0;
 char *errstr;
 
-typedef struct arptab_entry {
-    char ipaddr[ARP_TABLE_ENTRY_LEN];
-    char hwaddr[ARP_TABLE_ENTRY_LEN];
-    char dev[ARP_TABLE_ENTRY_LEN];
-    time_t tstamp;
-    int route_added;
-    struct arptab_entry *next;
-} ARPTAB_ENTRY;
+pthread_t my_threads[MAX_IFACES+1];
+int last_thread_idx=-1;
 
-ARPTAB_ENTRY *arptab=NULL;
+char * ifaces[MAX_IFACES+2];
+int last_iface_idx=-1;
+
+ARPTAB_ENTRY **arptab;
+pthread_mutex_t arptab_mutex;
 
 ARPTAB_ENTRY * findentry(char *ipaddr) 
 {
-    ARPTAB_ENTRY * cur_entry=arptab;
+    ARPTAB_ENTRY * cur_entry=*arptab;
     ARPTAB_ENTRY * prev_entry=NULL;
-    
+        
     while (cur_entry != NULL && strcmp(ipaddr, cur_entry->ipaddr)) {
 	prev_entry = cur_entry;
 	cur_entry = cur_entry->next;
@@ -69,11 +47,11 @@ ARPTAB_ENTRY * findentry(char *ipaddr)
 	    errstr = strerror(errno);
 	    syslog(LOG_INFO, "No memory: %s", errstr);
 	} else {
-	    if (prev_entry == NULL) { arptab=cur_entry; }
+	    if (prev_entry == NULL) { *arptab=cur_entry; }
 	    else { prev_entry->next = cur_entry; }
 	    cur_entry->next = NULL;
 	    cur_entry->ipaddr[0] = '\0';
-	    cur_entry->dev[0] = '\0';
+	    cur_entry->ifname[0] = '\0';
 	    cur_entry->route_added=0;
 	}
     }
@@ -83,7 +61,7 @@ ARPTAB_ENTRY * findentry(char *ipaddr)
 
 void processarp(int cleanup) 
 {
-    ARPTAB_ENTRY *cur_entry=arptab, *prev_entry=NULL;
+    ARPTAB_ENTRY *cur_entry=*arptab, *prev_entry=NULL;
     char routecmd_str[ROUTE_CMD_LEN];
 
     while (cur_entry != NULL) {
@@ -93,7 +71,7 @@ void processarp(int cleanup)
 	    /* added route to the kernel */
 	    if (snprintf(routecmd_str, ROUTE_CMD_LEN-1, 
 		     "/sbin/ip route add %s/32 metric 50 dev %s scope link",
-		     cur_entry->ipaddr, cur_entry->dev) > ROUTE_CMD_LEN-1) 
+		     cur_entry->ipaddr, cur_entry->ifname) > ROUTE_CMD_LEN-1) 
 	    {
 		syslog(LOG_INFO, "ip route command too large to fit in buffer!");
 	    } else {
@@ -108,7 +86,7 @@ void processarp(int cleanup)
 	    /* remove entry from arp table and remove route from kernel */
 	    if (snprintf(routecmd_str, ROUTE_CMD_LEN-1, 
 		     "/sbin/ip route del %s/32 metric 50 dev %s scope link",
-		     cur_entry->ipaddr, cur_entry->dev) > ROUTE_CMD_LEN-1) 
+		     cur_entry->ipaddr, cur_entry->ifname) > ROUTE_CMD_LEN-1) 
 	    {
 		syslog(LOG_INFO, "ip route command too large to fit in buffer!");
 	    } else {
@@ -121,9 +99,9 @@ void processarp(int cleanup)
 		free(cur_entry);
 		cur_entry=prev_entry->next;
 	    } else {
-		arptab = cur_entry->next;
+		*arptab = cur_entry->next;
 		free(cur_entry);
-		cur_entry=arptab;
+		cur_entry=*arptab;
 	    }
 		
 	} else {
@@ -163,6 +141,8 @@ void parseproc()
 	    if (firstline) { firstline=0; continue; }
 	    
 	    item=strtok(line, " ");
+
+	    pthread_mutex_lock(&arptab_mutex);
 	    entry=findentry(item);
 	    
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN)
@@ -171,6 +151,8 @@ void parseproc()
     		    errstr = strerror(errno);
 		    syslog(LOG_INFO, "Error during ARP table parsing: %s", errstr);
 	    }
+	    if ((entry->ipaddr_ia.s_addr = inet_addr(entry->ipaddr)) == -1)
+		    syslog(LOG_INFO, "Error parsing IP address %s", entry->ipaddr);
 	    
 	    item=strtok(NULL, " "); item=strtok(NULL, " "); item=strtok(NULL, " ");
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN)
@@ -183,11 +165,11 @@ void parseproc()
 	    item=strtok(NULL, " "); item=strtok(NULL, " ");
 	    if (item[strlen(item)-1] == '\n') { item[strlen(item)-1] = '\0'; }
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN) {
-		if (entry->route_added && !strcmp(item, entry->dev))
+		if (entry->route_added && !strcmp(item, entry->ifname))
 		    /* Remove route from kernel if it already exists */
 		    entry->tstamp=0;
 		else 
-		    strncpy(entry->dev, item, ARP_TABLE_ENTRY_LEN);
+		    strncpy(entry->ifname, item, ARP_TABLE_ENTRY_LEN);
 	    } else {
     		    errstr = strerror(errno);
 		    syslog(LOG_INFO, "Error during ARP table parsing: %s", errstr);
@@ -197,9 +179,10 @@ void parseproc()
 	    
 	    if (debug &! entry->route_added) {
 	        printf("refresh entry: IPAddr: '%s' HWAddr: '%s' Dev: '%s'\n", 
-		    entry->ipaddr, entry->hwaddr, entry->dev);
+		    entry->ipaddr, entry->hwaddr, entry->ifname);
 	    }
-	    
+
+	    pthread_mutex_unlock(&arptab_mutex);
 	}
     }
 
@@ -211,25 +194,67 @@ void parseproc()
 
 void cleanup() 
 {
+    int i=0;
+    
     syslog(LOG_INFO, "Received signal; cleaning up.");
+    for (i=0; i <= last_thread_idx; i++) {
+    }
+    pthread_mutex_trylock(&arptab_mutex);
     processarp(1);
     syslog(LOG_INFO, "Terminating.");
     exit(1);
 }
+
+void sighandler()
+{
+    pthread_exit(NULL);
+}
+
+void *main_thread()
+{
+    signal(SIGINT, sighandler);
+    signal(SIGTERM, sighandler);
+    signal(SIGHUP, sighandler);
+    
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+    pthread_cleanup_push(cleanup, NULL);
+    while (1) {
+	pthread_testcancel();
+        parseproc();
+        processarp(0);
+	sleep(SLEEPTIME);
+    }
+    pthread_cleanup_pop(1);
+}
     
 int main (int argc, char **argv)
 {
-    
     pid_t child_pid;
+    int i, help=1;
     
     progname = (char *) basename(argv[0]);
     
-    if (argc > 1 && !strcmp(argv[1],"-d")) debug=1;
-    else if (argc > 1) {
-	printf("parprouted: proxy ARP routing daemon, version %s.\n", VERSION);
-	printf("(C) 2002 Vladimir Ivaschenko <vi@maks.net>, GPL2 license.\n");
-	printf("Usage: parprouted [-d]\n");
-	exit(1);
+    for (i = 1; i < argc; i++) {
+	if (!strcmp(argv[i],"-d")) { 
+	    debug=1;
+	    help=0;
+	}
+	else if (!strcmp(argv[i],"-h") || !strcmp(argv[i],"--help")) {
+	    break;
+	}
+	else {
+	    last_iface_idx++;
+	    ifaces[last_iface_idx]=argv[i];
+	    help=0;
+	}
+    }
+
+    if (help || last_iface_idx <= -1) {
+	    printf("parprouted: proxy ARP routing daemon, version %s.\n", VERSION);
+    	    printf("(C) 2002 Vladimir Ivaschenko <vi@maks.net>, GPL2 license.\n");
+	    printf("Usage: parprouted [-d] interface [interface]\n");
+	    exit(1);
     }
 
     if (!debug) {
@@ -266,17 +291,40 @@ int main (int argc, char **argv)
         close(2);
 
     }
-    
-    openlog(progname, LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
-    syslog(LOG_INFO, "Starting");
 
-    signal(SIGINT, cleanup);
-    signal(SIGTERM, cleanup);
-    signal(SIGHUP, cleanup);
-    
-    while (1) {
-        parseproc();
-        processarp(0);
-	sleep(SLEEPTIME);
+      
+    openlog(progname, LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
+    syslog(LOG_INFO, "Starting.");
+
+    if ((arptab = (ARPTAB_ENTRY **) malloc(sizeof(ARPTAB_ENTRY **))) == NULL) {
+	    errstr = strerror(errno);
+	    syslog(LOG_INFO, "No memory: %s", errstr);
     }
+    
+    *arptab = NULL;
+
+    if (pthread_create(&my_threads[++last_thread_idx], NULL, main_thread, NULL)) {
+	syslog(LOG_ERR, "Error creating main thread.");
+	abort();
+    }
+
+    signal(SIGINT, SIG_IGN);
+    signal(SIGTERM, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
+
+    for (i=0; i <= last_iface_idx; i++) {
+	if (pthread_create(&my_threads[++last_thread_idx], NULL, arp, (void *) ifaces[i])) {
+	    syslog(LOG_ERR, "Error creating ARP thread for %s.",ifaces[i]);
+	    abort();
+	}
+	if (debug) printf("Created ARP thread for %s.\n",ifaces[i]);
+    }
+        
+    if (pthread_join(my_threads[0], NULL)) {
+	syslog(LOG_ERR, "Error joining thread.");
+	abort();
+    }
+
+    while (waitpid(-1, NULL, WNOHANG)) { }    
+    exit(1);     
 }

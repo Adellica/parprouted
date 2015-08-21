@@ -1,0 +1,62 @@
+
+=pod
+
+=head1 NAME
+
+B<parprouted> - Proxy ARP IP bridging daemon
+
+=head1 SYNOPSIS
+
+B<parprouted> [B<-d>] B<interface> [B<interface>]
+
+=head1 DESCRIPTION
+
+parprouted is a daemon for transparent IP (Layer 3) proxy ARP bridging. 
+Unlike standard bridging, proxy ARP bridging allows to bridge Ethernet 
+networks behind wireless nodes. Normal L2 bridging does not work between 
+wireless nodes because wireless does not know about MAC addresses used 
+in the wired Ethernet networks.
+
+The daemon will listen for incoming ARP requests and forward
+them to other interfaces, as well as update kernel ARP table with the
+received replies. Also the daemon will add direct /32 routes to your
+kernel to the hosts learned via ARP. This way, your kernel will be able
+to route the packets to the destination host when it receives it and you will
+not have to care about setting routing/subnetting manually. All routes
+entered by the daemon will have a metric of 50. 
+
+It takes about 3-5 seconds for a bridge to update all its tables and
+start sending packets to the destination. So, for example, if you have
+two bridges, the bridging time can be up to 10 seconds. However
+afterwards ARP entries are in the tables and there will be no delay
+until they time out.
+
+=head1 PREREQUISITES
+
+parprouted requires "ip" program form iproute2 tools to be installed in 
+/sbin. If it is installed in another location, please replace "/sbin/ip" 
+occurances in the source with the correct path. As well you should have
+proc filesystem mounted in /proc because the daemon uses /proc/net/arp.
+
+A requirement is that you have an IP address assigned on all of your
+interfaces that you do bridging on. There is no need for this address
+to be from the same networks as the bridged networks. Any dummy address
+will do.
+
+=head1 OPTIONS
+
+The list of interfaces to do bridging on should be given via the command
+line.
+
+The daemon accepts switch B<-d>, which stands for debugging. If you
+run it in debugging mode the daemon will go to background and will print
+additional debugging information to stdout/stderr.
+
+=head1 EXAMPLE
+
+To bridge between wlan0 and eth0: B<parprouted eth0 wlan0>
+
+=head1 AUTHOR
+
+ (C) 2002, Vladimir Ivaschenko <vi@maks.net>
+ http://www.hazard.maks.net
