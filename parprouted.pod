@@ -38,15 +38,21 @@ until they time out.
 
 =head1 REQUIREMENTS
 
-parprouted requires "ip" program form iproute2 tools to be installed in 
+This daemon can be used for unicast traffic only. I.e., DHCP is not supported.
+Use software such as dhcrelay to "bridge" DHCP.
+
+You should have an IP address assigned on all of your interfaces that you do 
+bridging on. There is no need for this address to be from the same networks as 
+the bridged networks. Any dummy address will do.
+
+The system should have correct default route.
+
+parprouted requires "ip" program from iproute2 tools to be installed in 
 /sbin. If it is installed in another location, please replace "/sbin/ip" 
 occurances in the source with the correct path. As well you should have
 proc filesystem mounted in /proc because the daemon uses /proc/net/arp.
 
-A requirement is that you have an IP address assigned on all of your
-interfaces that you do bridging on. There is no need for this address
-to be from the same networks as the bridged networks. Any dummy address
-will do.
+parprouted is designed for and tested only with Linux 2.4.x kernels.
 
 =head1 OPTIONS
 
@@ -68,5 +74,5 @@ To bridge between wlan0 and eth0: B<parprouted eth0 wlan0>
 
 =head1 AUTHOR
 
- (C) 2002, Vladimir Ivaschenko <vi@maks.net>
+ (C) 2004, Vladimir Ivaschenko <vi@maks.net>
  http://www.hazard.maks.net

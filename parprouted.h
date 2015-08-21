@@ -20,15 +20,15 @@
 #define PROC_ARP "/proc/net/arp"
 #define ARP_LINE_LEN 255
 #define ARP_TABLE_ENTRY_LEN 20
-#define ARP_TABLE_ENTRY_TIMEOUT 43200
+#define ARP_TABLE_ENTRY_TIMEOUT 60 /* seconds */
 #define ROUTE_CMD_LEN 255
-#define SLEEPTIME 200000 /* 200 ms */
-#define REFRESHTIME 50 /* 50 sec */
+#define SLEEPTIME 1000000 /* ms */
+#define REFRESHTIME 50 /* seconds */
 #define MAX_IFACES 10
 
 #define MAX_RQ_SIZE 50	/* maximum size of request queue */
 
-#define VERSION "0.5"
+#define VERSION "0.6"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -50,12 +50,12 @@
 #include <unistd.h>
 
 typedef struct arptab_entry {
-    char ipaddr[ARP_TABLE_ENTRY_LEN];
     struct in_addr ipaddr_ia;
     char hwaddr[ARP_TABLE_ENTRY_LEN];
     char ifname[ARP_TABLE_ENTRY_LEN];
     time_t tstamp;
     int route_added;
+    int incomplete;
     struct arptab_entry *next;
 } ARPTAB_ENTRY;
 
@@ -71,6 +71,9 @@ extern int last_iface_idx;
 
 extern void *arp(char *ifname);
 extern void refresharp(ARPTAB_ENTRY *list);
+extern void arp_req(char *ifname, struct in_addr remaddr);
 
 extern void parseproc();
 extern void processarp(int cleanup);
+
+

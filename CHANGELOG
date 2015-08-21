@@ -1,3 +1,9 @@
+Sun 11 Jan 2004 01:38:43 PM EET
+parprouted 0.6:
+Now ARP queries from the local host are resolved as well. Various small updates
+to code and documentation.
+
+------------------------------------------------------------------------
 Tue 06 Jan 2004 09:22:09 PM EET
 parprouted 0.50:
 Much improved performance and robustness. Request queue is now kept

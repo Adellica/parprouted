@@ -35,12 +35,12 @@ int last_iface_idx=-1;
 ARPTAB_ENTRY **arptab;
 pthread_mutex_t arptab_mutex;
 
-ARPTAB_ENTRY * findentry(char *ipaddr) 
+ARPTAB_ENTRY * replace_entry(struct in_addr ipaddr) 
 {
     ARPTAB_ENTRY * cur_entry=*arptab;
     ARPTAB_ENTRY * prev_entry=NULL;
         
-    while (cur_entry != NULL && strcmp(ipaddr, cur_entry->ipaddr)) {
+    while (cur_entry != NULL && ipaddr.s_addr != cur_entry->ipaddr_ia.s_addr) {
 	prev_entry = cur_entry;
 	cur_entry = cur_entry->next;
     };
@@ -53,13 +53,28 @@ ARPTAB_ENTRY * findentry(char *ipaddr)
 	    if (prev_entry == NULL) { *arptab=cur_entry; }
 	    else { prev_entry->next = cur_entry; }
 	    cur_entry->next = NULL;
-	    cur_entry->ipaddr[0] = '\0';
 	    cur_entry->ifname[0] = '\0';
 	    cur_entry->route_added=0;
 	}
     }
     
     return cur_entry;	
+}
+
+int findentry(struct in_addr ipaddr)
+{
+    ARPTAB_ENTRY * cur_entry=*arptab;
+    ARPTAB_ENTRY * prev_entry=NULL;
+        
+    while (cur_entry != NULL && ipaddr.s_addr != cur_entry->ipaddr_ia.s_addr) {
+	prev_entry = cur_entry;
+	cur_entry = cur_entry->next;
+    };
+    
+    if (cur_entry == NULL)
+	return 0;
+    else
+	return 1;
 }
 
 void processarp(int cleanup) 
@@ -71,14 +86,14 @@ void processarp(int cleanup)
 
 	if (cur_entry->tstamp - time(NULL) <= ARP_TABLE_ENTRY_TIMEOUT 
 	    && !cur_entry->route_added 
-	    && strcmp(cur_entry->ifname, "") != 0 
+	    && !cur_entry->incomplete
 	    && !cleanup) 
 	{
 
 	    /* added route to the kernel */
 	    if (snprintf(routecmd_str, ROUTE_CMD_LEN-1, 
 		     "/sbin/ip route add %s/32 metric 50 dev %s scope link",
-		     cur_entry->ipaddr, cur_entry->ifname) > ROUTE_CMD_LEN-1) 
+		     inet_ntoa(cur_entry->ipaddr_ia), cur_entry->ifname) > ROUTE_CMD_LEN-1) 
 	    {
 		syslog(LOG_INFO, "ip route command too large to fit in buffer!");
 	    } else {
@@ -89,14 +104,15 @@ void processarp(int cleanup)
 	    cur_entry->route_added = 1;
 	    cur_entry = cur_entry->next;
 
-	} else if (cur_entry->tstamp - time(NULL) > ARP_TABLE_ENTRY_TIMEOUT 
-		    || strcmp(cur_entry->ifname, "") == 0
-		    || cleanup) {
+	} else if (!cur_entry->incomplete && (
+		     cur_entry->tstamp - time(NULL) > ARP_TABLE_ENTRY_TIMEOUT 
+		     || cleanup
+		    )) {
 
 	    /* remove entry from arp table and remove route from kernel */
 	    if (snprintf(routecmd_str, ROUTE_CMD_LEN-1, 
 		     "/sbin/ip route del %s/32 metric 50 dev %s scope link",
-		     cur_entry->ipaddr, cur_entry->ifname) > ROUTE_CMD_LEN-1) 
+		     inet_ntoa(cur_entry->ipaddr_ia), cur_entry->ifname) > ROUTE_CMD_LEN-1) 
 	    {
 		syslog(LOG_INFO, "ip route command too large to fit in buffer!");
 	    } else {
@@ -129,6 +145,9 @@ void parseproc()
     ARPTAB_ENTRY *entry;
     char line[ARP_LINE_LEN];
     char *item;
+    struct in_addr ipaddr;
+    int incomplete=0;
+    int i;
     
     /* Parse /proc/net/arp table */
         
@@ -150,26 +169,34 @@ void parseproc()
 	    }
 	} else {
 	    if (firstline) { firstline=0; continue; }
+
+	    incomplete=0;
 	    	    
-	    /* Ignore incomplete ARP entries */
+	    /* Incomplete ARP entries with MAC 00:00:00:00:00:00 */
 	    if (strstr(line, "00:00:00:00:00:00") != NULL) 
-		continue;
+		incomplete=1;
 		
-	    /* ignore incomplete entries having flag 0x0 */
+	    /* Incomplete entries having flag 0x0 */
 	    if (strstr(line, "0x0") != NULL)
-		continue;
+		incomplete=1;
 	    
 	    item=strtok(line, " ");
 
-	    entry=findentry(item);
+	    if ((inet_aton(item, &ipaddr)) == -1)
+		    syslog(LOG_INFO, "Error parsing IP address %s", item);
 	    
-	    if (strlen(item) < ARP_TABLE_ENTRY_LEN)
-		strncpy(entry->ipaddr, item, ARP_TABLE_ENTRY_LEN);
-	    else
-		syslog(LOG_INFO, "Error during ARP table parsing");
+	    /* if IP address is marked as undiscovered and does not exist in arptab,
+	       send ARP request to all ifaces */
 
-	    if ((entry->ipaddr_ia.s_addr = inet_addr(entry->ipaddr)) == -1)
-		    syslog(LOG_INFO, "Error parsing IP address %s", entry->ipaddr);
+	    if (incomplete &! findentry(ipaddr) ) {
+		for (i=0; i <= last_iface_idx; i++)
+		    arp_req(ifaces[i], ipaddr);
+	    }
+
+	    entry=replace_entry(ipaddr);
+	    entry->incomplete = incomplete;
+	    
+	    entry->ipaddr_ia.s_addr = ipaddr.s_addr;
 	    
 	    /* Hardware type */
 	    item=strtok(NULL, " "); 
@@ -204,9 +231,9 @@ void parseproc()
 
 	    time(&entry->tstamp);
 	    
-	    if (debug &! entry->route_added) {
+	    if (debug &! entry->route_added && !incomplete) {
 	        printf("add entry: IPAddr: '%s' HWAddr: '%s' Dev: '%s'\n", 
-		    entry->ipaddr, entry->hwaddr, entry->ifname);
+		    inet_ntoa(entry->ipaddr_ia), entry->hwaddr, entry->ifname);
 	    }
 
 	}

@@ -163,15 +163,19 @@ afterwards \s-1ARP\s0 entries are in the tables and there will be no delay
 until they time out.
 .SH "REQUIREMENTS"
 .IX Header "REQUIREMENTS"
+This daemon can be used for unicast traffic only. I.e., \s-1DHCP\s0 is not supported.
+Use software such as dhcrelay to \*(L"bridge\*(R" \s-1DHCP\s0.
+.PP
+You should have an \s-1IP\s0 address assigned on all of your interfaces that you do 
+bridging on. There is no need for this address to be from the same networks as 
+the bridged networks. Any dummy address will do.
+.PP
+The system should have correct default route.
+.PP
 parprouted requires \*(L"ip\*(R" program form iproute2 tools to be installed in 
 /sbin. If it is installed in another location, please replace \*(L"/sbin/ip\*(R" 
 occurances in the source with the correct path. As well you should have
 proc filesystem mounted in /proc because the daemon uses /proc/net/arp.
-.PP
-A requirement is that you have an \s-1IP\s0 address assigned on all of your
-interfaces that you do bridging on. There is no need for this address
-to be from the same networks as the bridged networks. Any dummy address
-will do.
 .SH "OPTIONS"
 .IX Header "OPTIONS"
 The list of interfaces to do bridging on should be given via the command
@@ -191,6 +195,6 @@ To bridge between wlan0 and eth0: \fBparprouted eth0 wlan0\fR
 .SH "AUTHOR"
 .IX Header "AUTHOR"
 .Vb 2
-\& (C) 2002, Vladimir Ivaschenko <vi@maks.net>
+\& (C) 2004, Vladimir Ivaschenko <vi@maks.net>
 \& http://www.hazard.maks.net
 .Ve
