@@ -1,4 +1,4 @@
-parprouted, (C) 2002 Vladimir Ivaschenko <vi@maks.net>
+parprouted, (C) 2004 Vladimir Ivaschenko <vi@maks.net>
 -------------------------------------------------------
 
 1) Installation:
@@ -10,4 +10,9 @@ Manual can be found by typing "man parprouted".
 
 2) Contact/copyright:
 
-GPL2, (C) 2002, Vladimir Ivaschenko <vi@maks.net>
+GPLv2, (C) 2002-2004, Vladimir Ivaschenko <vi@maks.net>
+
+3) Acknowledgements:
+
+tarpd v1.6 by tricky@cs.hut.fi
+watchdog by Michael Meskes <meskes@debian.org>

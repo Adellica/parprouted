@@ -1,8 +1,5 @@
-/* Code partly based on tarpd.c 1.6 (Public Domain):
- * 	$Id: tarpd.c,v 1.6 1999/09/17 12:09:40 tricky Exp $
- */
-
-/* (C) 2002 Vladimir Ivaschenko <vi@maks.net>
+/* parprouted: ProxyARP routing daemon. 
+ * (C) 2004 Vladimir Ivaschenko <vi@maks.net>
  *
  * This application is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -420,22 +417,23 @@ void *arp(char *ifname)
     if (debug)
 	  printf("Received ARP request for %s on iface %s\n", inet_ntoa(dia), (char *) ifname);
 
-    pthread_mutex_lock(&arptab_mutex);
-    if ( ipaddr_known(*arptab, dia, (char *) ifname) != 0 ) {
-      arp_reply(&frame, &ifs);
-    } else {
-    /* Relay the ARP request to all other interfaces */
-	for (i=0; i <= last_iface_idx; i++) {
-    	    if (strcmp(ifaces[i], ifname)) {
-		arp_req(ifaces[i], dia);
+    if (memcmp(&dia,&sia,sizeof(dia)) && dia.s_addr != 0) {
+        pthread_mutex_lock(&arptab_mutex);
+        if ( ipaddr_known(*arptab, dia, (char *) ifname) != 0 ) {
+          arp_reply(&frame, &ifs);
+        } else {
+            /* Relay the ARP request to all other interfaces */
+	    for (i=0; i <= last_iface_idx; i++) {
+    	        if (strcmp(ifaces[i], ifname)) {
+		    arp_req(ifaces[i], dia);
+		}
 	    }
+	    /* Add the request to the request queue */
+	    if (debug)
+    		printf("Adding %s to request queue\n", inet_ntoa(sia));
+	    rq_add(&frame, &ifs);
 	}
-    /* Add the request to the request queue */
-	if (debug)
-    	    printf("Adding %s to request queue\n", inet_ntoa(sia));
-	rq_add(&frame, &ifs);
-    }
-    pthread_mutex_unlock(&arptab_mutex);
-    
+	pthread_mutex_unlock(&arptab_mutex);
+    }    
   }
 }

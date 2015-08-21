@@ -144,23 +144,24 @@ wireless nodes because wireless does not know about \s-1MAC\s0 addresses used
 in the wired Ethernet networks. Also this daemon is useful
 for making transparent firewalls.
 .PP
-The daemon will listen for incoming \s-1ARP\s0 requests and forward
-them to other interfaces, as well as update kernel \s-1ARP\s0 table with the
-received replies. Also the daemon will add direct /32 routes to your
-kernel to the hosts learned via \s-1ARP\s0. This way, your kernel will be able
-to route the packets to the destination host when it receives it and you will
-not have to care about setting routing/subnetting manually. All routes
-entered by the daemon will have a metric of 50. 
+The daemon listens for incoming \s-1ARP\s0 requests, and in case the location 
+of the requested \s-1IP\s0 address is unknown, forwards them to other interfaces, 
+as well as updates kernel \s-1ARP\s0 table with the received replies. When 
+necessary, the daemon generates an \s-1ARP\s0 reply itself, which causes the 
+stations to send traffic to the host daemon is running on. By 
+automatically adding appropriate /32 routes to Linux kernel \s-1IP\s0 routing 
+table for the hosts learned via \s-1ARP\s0, daemon ensures that the Linux kernel 
+will be able to route the packets to the destination host when it receives 
+them without any need routing/subnetting manually.  
+.PP
+All routes entered by the daemon have a metric of 50. 
 .PP
 Unless you use \fB\-p\fR switch, all entries in the \s-1ARP\s0 table will be
 refreshed (rechecked by sending \s-1ARP\s0 requests) every 50 seconds. This
 keeps them from being expired by kernel.
 .PP
-It takes about 3\-5 seconds for a bridge to update all its tables and
-start sending packets to the destination. So, for example, if you have
-two bridges, the bridging time can be up to 10 seconds. However
-afterwards \s-1ARP\s0 entries are in the tables and there will be no delay
-until they time out.
+Normally it takes about 60 ms for a bridge to update all its tables and
+start sending packets to the destination.
 .SH "REQUIREMENTS"
 .IX Header "REQUIREMENTS"
 This daemon can be used for unicast traffic only. I.e., \s-1DHCP\s0 is not supported.
@@ -172,10 +173,12 @@ the bridged networks. Any dummy address will do.
 .PP
 The system should have correct default route.
 .PP
-parprouted requires \*(L"ip\*(R" program form iproute2 tools to be installed in 
+parprouted requires \*(L"ip\*(R" program from iproute2 tools to be installed in 
 /sbin. If it is installed in another location, please replace \*(L"/sbin/ip\*(R" 
 occurances in the source with the correct path. As well you should have
 proc filesystem mounted in /proc because the daemon uses /proc/net/arp.
+.PP
+parprouted is designed for and tested only with Linux 2.4.x kernels.
 .SH "OPTIONS"
 .IX Header "OPTIONS"
 The list of interfaces to do bridging on should be given via the command

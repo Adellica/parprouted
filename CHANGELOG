@@ -1,3 +1,8 @@
+Tue 20 Apr 2004 07:37:20 AM EEST
+parprouted 0.62:
+Fix problem with systems checking for IP address conflicts, such as
+Windows XP.
+
 Sun 11 Jan 2004 01:38:43 PM EET
 parprouted 0.6:
 Now ARP queries from the local host are resolved as well. Various small updates

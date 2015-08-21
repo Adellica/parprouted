@@ -1,5 +1,5 @@
 /* parprouted: ProxyARP routing daemon. 
- * (C) 2002 Vladimir Ivaschenko <vi@maks.net>
+ * (C) 2004 Vladimir Ivaschenko <vi@maks.net>
  *
  * This application is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,6 +15,7 @@
  * License along with this library; if not, write to the
  * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
  * Boston, MA 02111-1307, USA.
+ *
  */
  
 #include "parprouted.h"
@@ -29,7 +30,7 @@ char *errstr;
 pthread_t my_threads[MAX_IFACES+1];
 int last_thread_idx=-1;
 
-char * ifaces[MAX_IFACES+2];
+char * ifaces[MAX_IFACES];
 int last_iface_idx=-1;
 
 ARPTAB_ENTRY **arptab;
@@ -331,14 +332,12 @@ int main (int argc, char **argv)
     }
 
     if (!debug) {
-	/* stolen from watchdog.c */
         /* fork to go into the background */
         if ((child_pid = fork()) < 0) {
-            perror(progname);
+            fprintf(stderr, "could not fork(): %s", strerror(errno));
             exit(1);
         } else if (child_pid > 0) {
-            /* fork was okay          */
-            /* wait for child to exit */
+            /* fork was ok, wait for child to exit */
             if (waitpid(child_pid, NULL, 0) != child_pid) {
                 perror(progname);
                 exit(1);
@@ -353,12 +352,10 @@ int main (int argc, char **argv)
         } else if (child_pid > 0)
             exit(0);
 
-        /* Okay, we're a daemon     */
-        /* but we're still attached to the tty */
         /* create our own session */
         setsid();
 
-        /* with USE_SYSLOG we don't do any console IO */
+        /* close stdin/stdout/stderr */
         close(0);
         close(1);
         close(2);
