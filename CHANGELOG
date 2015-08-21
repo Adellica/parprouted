@@ -1,3 +1,9 @@
+Mon 24 May 2004 09:38:44 PM EEST
+parprouted 0.63:
+Fix memory leak reported by Doug Bostrom <dbostrom AT mindspring.com>: 
+in case request queue was full the oldest entry wasn't actually freed.
+
+------------------------------------------------------------------------
 Tue 20 Apr 2004 07:37:20 AM EEST
 parprouted 0.62:
 Fix problem with systems checking for IP address conflicts, such as
@@ -35,4 +41,4 @@ parprouted 0.3:
 Critical bugfix. Previous parprouted failed in networks of any 
 considerable complexity. Almost complete rewrite. parprouted now is 
 multithreaded and does  everything in userspace (including ARP relaying,
-spoofing and listening). No need to set proxy_arp in kernel anymore. 
+spoofing and listening). No need to set proxy_arp in kernel anymore.

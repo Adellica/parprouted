@@ -231,10 +231,15 @@ int rq_add(ether_arp_frame *req_frame, struct sockaddr_ll *req_if)
     /* Check if the list has more entries than MAX_RQ_SIZE, 
      * and delete the oldest entry */    
     if (req_queue_len > MAX_RQ_SIZE) {
+	RQ_ENTRY *temp;
+	
 	if (debug)
 	    printf("Request queue has grown too large, deleting last element\n");
+	temp = req_queue;
 	req_queue = req_queue->next;
 	req_queue_len--;
+	
+	free(temp);
     }
 
     /* Add entry to the list */
