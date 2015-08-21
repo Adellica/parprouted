@@ -25,7 +25,7 @@
 #define SLEEPTIME 1
 #define MAX_IFACES 10
 
-#define VERSION "0.3"
+#define VERSION "0.31"
 
 #include <errno.h>
 #include <fcntl.h>

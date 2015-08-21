@@ -44,7 +44,8 @@ int ipaddr_known(ARPTAB_ENTRY *list, struct in_addr addr, char *ifname)
     list = list->next;
   }
   
-  printf ("Did not find match for %s(%s)\n", inet_ntoa(addr), ifname);
+  if (debug)
+      printf ("Did not find match for %s(%s)\n", inet_ntoa(addr), ifname);
   return 0;
 }
 
@@ -233,14 +234,15 @@ void *arp(void *ifname)
 	  
           k_arpreq.arp_ha.sa_family = ARPHRD_ETHER;
           memcpy(&k_arpreq.arp_ha.sa_data, &frame.arp.arp_sha, sizeof(frame.arp.arp_sha));
-	  k_arpreq.arp_flags = ATF_COM;
+	  k_arpreq.arp_flags = ATF_COM | ATF_PERM;
 	  strncpy(k_arpreq.arp_dev, ifname, sizeof(k_arpreq.arp_dev));
 
 	  k_arpreq.arp_pa.sa_family = AF_INET;
 	  sin = (struct sockaddr_in *) &k_arpreq.arp_pa;
 	  memcpy(&sin->sin_addr.s_addr, &frame.arp.arp_spa, sizeof(sin->sin_addr));
 	  
-	  printf("Updating kernel ARP table for %s(%s).\n", inet_ntoa(sin->sin_addr), (char *) ifname);
+	  if (debug)
+	      printf("Updating kernel ARP table for %s(%s).\n", inet_ntoa(sin->sin_addr), (char *) ifname);
 	  if (ioctl(arpsock, SIOCSARP, &k_arpreq) < 0) {
 		syslog(LOG_ERR, "error: ioctl SIOCSARP for %s(%s): %s", inet_ntoa(sin->sin_addr), (char *) ifname, sys_errlist[errno]);
 		close(arpsock);
