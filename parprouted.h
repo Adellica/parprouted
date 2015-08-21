@@ -22,11 +22,13 @@
 #define ARP_TABLE_ENTRY_LEN 20
 #define ARP_TABLE_ENTRY_TIMEOUT 43200
 #define ROUTE_CMD_LEN 255
-#define SLEEPTIME 100000 /* 100 ms */
+#define SLEEPTIME 200000 /* 200 ms */
 #define REFRESHTIME 50 /* 50 sec */
 #define MAX_IFACES 10
 
-#define VERSION "0.4"
+#define MAX_RQ_SIZE 50	/* maximum size of request queue */
+
+#define VERSION "0.5"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -62,9 +64,13 @@ extern int option_arpperm;
 
 extern ARPTAB_ENTRY **arptab;
 extern pthread_mutex_t arptab_mutex;
+extern pthread_mutex_t req_queue_mutex;
 
 extern char * ifaces[MAX_IFACES+2];
 extern int last_iface_idx;
 
-extern void *arp(void *ifname);
+extern void *arp(char *ifname);
 extern void refresharp(ARPTAB_ENTRY *list);
+
+extern void parseproc();
+extern void processarp(int cleanup);

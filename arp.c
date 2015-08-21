@@ -34,14 +34,25 @@ typedef struct _ether_arp_frame {
   struct ether_arp arp;
 } ether_arp_frame;
 
+typedef struct _req_struct {
+    ether_arp_frame req_frame;
+    struct sockaddr_ll req_if;
+    struct _req_struct *next;
+} RQ_ENTRY;
+
+RQ_ENTRY *req_queue = NULL;
+RQ_ENTRY *req_queue_tail = NULL;
+int req_queue_len = 0;
+pthread_mutex_t req_queue_mutex;
+
+/* Check if the IP address exists in the arptab */
+
 int ipaddr_known(ARPTAB_ENTRY *list, struct in_addr addr, char *ifname) 
 {
-
   while (list != NULL) {
     /* If we have this address in the table and ARP request comes from a 
        different interface, then we can reply */
     if ( addr.s_addr == list->ipaddr_ia.s_addr && strcmp(ifname, list->ifname)) {
-	pthread_mutex_unlock(&arptab_mutex);
         return 1;
     }
     list = list->next;
@@ -52,6 +63,8 @@ int ipaddr_known(ARPTAB_ENTRY *list, struct in_addr addr, char *ifname)
 
   return 0;
 }
+
+/* Wait for an ARP packet */
 
 int arp_recv(int sock, ether_arp_frame *frame) 
 {
@@ -73,13 +86,21 @@ int arp_recv(int sock, ether_arp_frame *frame)
 
 /* Send ARP is-at reply */
 
-void arp_reply(int sock, ether_arp_frame *frame, struct sockaddr_ll *ifs) 
+void arp_reply(ether_arp_frame *reqframe, struct sockaddr_ll *ifs) 
 {
-  struct ether_arp *arp = &frame->arp;
+  struct ether_arp *arp = &reqframe->arp;
   unsigned char ip[4];
+  int sock;
 
-  memcpy(&frame->ether_hdr.ether_dhost, &arp->arp_sha, ETH_ALEN);
-  memcpy(&frame->ether_hdr.ether_shost, ifs->sll_addr, ETH_ALEN);
+  sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
+
+  if (bind(sock, (struct sockaddr *) ifs, sizeof(struct sockaddr_ll)) < 0) {
+    fprintf(stderr, "arp_reply() bind: %s\n", strerror(errno));
+    abort();
+  }
+
+  memcpy(&reqframe->ether_hdr.ether_dhost, &arp->arp_sha, ETH_ALEN);
+  memcpy(&reqframe->ether_hdr.ether_shost, ifs->sll_addr, ETH_ALEN);
 
   memcpy(&arp->arp_tha, &arp->arp_sha, ETH_ALEN);
   memcpy(&arp->arp_sha, ifs->sll_addr, ETH_ALEN);
@@ -90,8 +111,20 @@ void arp_reply(int sock, ether_arp_frame *frame, struct sockaddr_ll *ifs)
 
   arp->arp_op = htons(ARPOP_REPLY);
 
-  sendto(sock, frame, sizeof(ether_arp_frame), 0, 
+  if (debug) {
+    struct in_addr sia;
+    struct in_addr dia;
+    
+    sia.s_addr = *((long *)arp->arp_spa);
+    dia.s_addr = *((long *)arp->arp_tpa);
+
+    printf("Replying to %s faking %s\n", inet_ntoa(sia), inet_ntoa(dia));
+  }
+
+  sendto(sock, reqframe, sizeof(ether_arp_frame), 0, 
 	 (struct sockaddr *)ifs, sizeof(struct sockaddr_ll));
+
+  close(sock);
 }
 
 /* Send ARP who-has request */
@@ -105,6 +138,10 @@ void arp_req(char *ifname, struct in_addr remaddr)
   struct ifreq ifr;
   unsigned long ifaddr; 
   struct sockaddr_in *sin;
+
+  /* Make sure that interface is not empty */
+  if (strcmp(ifname, "") == 0)
+    return;
   
   sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
 
@@ -112,7 +149,7 @@ void arp_req(char *ifname, struct in_addr remaddr)
   memset(ifr.ifr_name, 0, IFNAMSIZ);
   strncpy(ifr.ifr_name, (char *) ifname, IFNAMSIZ);
   if(ioctl(sock, SIOCGIFHWADDR, &ifr) < 0) {
-    syslog(LOG_ERR, "error: ioctl SIOCGIFHWADDR for %s: %s\n", (char *) ifname, sys_errlist[errno]);
+    syslog(LOG_ERR, "error in arp_req(): ioctl SIOCGIFHWADDR for %s: %s\n", (char *) ifname, strerror(errno));
     abort();
   }
 
@@ -120,7 +157,7 @@ void arp_req(char *ifname, struct in_addr remaddr)
   memcpy(ifs.sll_addr, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
 
   if(ioctl(sock, SIOCGIFINDEX, &ifr) < 0) {
-	syslog(LOG_ERR, "error: ioctl SIOCGIFINDEX for %s: %s", (char *) ifname, sys_errlist[errno]);
+	syslog(LOG_ERR, "error in arp_req(): ioctl SIOCGIFINDEX for %s: %s", (char *) ifname, strerror(errno));
         return;
   }
 
@@ -135,7 +172,7 @@ void arp_req(char *ifname, struct in_addr remaddr)
 	sin = (struct sockaddr_in *) &ifr.ifr_addr;
 	ifaddr = sin->sin_addr.s_addr;
   } else {
-	syslog(LOG_ERR, "error: ioctl SIOCGIFADDR for %s: %s", (char *) ifname, sys_errlist[errno]);
+	syslog(LOG_ERR, "error: ioctl SIOCGIFADDR for %s: %s", (char *) ifname, strerror(errno));
 	return;
   }
 
@@ -156,34 +193,11 @@ void arp_req(char *ifname, struct in_addr remaddr)
   arp->arp_op = htons(ARPOP_REQUEST);
 
   if (debug) 
-      printf("Relaying ARP request for %s to %s\n", inet_ntoa(remaddr), ifname);
+      printf("Sending ARP request for %s to %s\n", inet_ntoa(remaddr), ifname);
   sendto(sock, &frame, sizeof(ether_arp_frame), 0, 
 	 (struct sockaddr *) &ifs, sizeof(struct sockaddr_ll));
   close(sock);
-}
 
-void send_dummy_udp(char *ifname, u_int32_t remaddr) {
-    int sock;
-    struct sockaddr_in target;
-    char sndbuf;
-    
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-	syslog(LOG_ERR, "send_dummy_udp: socket error: %s", sys_errlist[errno]);
-	return;
-    }
-
-    if (setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, ifname, strlen(ifname)+1) == -1) {
-	syslog(LOG_ERR, "send_dummy_udp: couldn't bind to device %s: %s", ifname, sys_errlist[errno]);
-	return;
-    }
-        
-    target.sin_family = AF_INET;
-    memcpy(&target.sin_addr, &remaddr, sizeof(remaddr));
-    target.sin_port = htons(44444);
-    sendto(sock, &sndbuf, sizeof(sndbuf), 0, (struct sockaddr *) &target, sizeof(target));
-
-    close(sock);
 }
 
 /* ARP ping all entries in the table */
@@ -203,7 +217,100 @@ void refresharp(ARPTAB_ENTRY *list)
   pthread_mutex_unlock(&arptab_mutex);
 }
 
-void *arp(void *ifname) 
+
+int rq_add(ether_arp_frame *req_frame, struct sockaddr_ll *req_if)
+{
+    RQ_ENTRY *new_entry;
+    
+    if ((new_entry = (RQ_ENTRY *) malloc(sizeof(RQ_ENTRY))) == NULL) {
+	    syslog(LOG_INFO, "No memory: %s", strerror(errno));
+	    return 0;
+    }
+
+    pthread_mutex_lock(&req_queue_mutex);
+
+    req_queue_len++;
+
+    /* Check if the list has more entries than MAX_RQ_SIZE, 
+     * and delete the oldest entry */    
+    if (req_queue_len > MAX_RQ_SIZE) {
+	if (debug)
+	    printf("Request queue has grown too large, deleting last element\n");
+	req_queue = req_queue->next;
+	req_queue_len--;
+    }
+
+    /* Add entry to the list */
+    
+    if (req_queue != NULL)
+	req_queue_tail->next = new_entry;
+    else
+	req_queue = new_entry;
+
+    req_queue_tail = new_entry;
+
+    new_entry->next = NULL;
+
+    memcpy(&new_entry->req_frame, req_frame, sizeof(ether_arp_frame));
+    memcpy(&new_entry->req_if, req_if, sizeof(struct sockaddr_ll));
+
+    pthread_mutex_unlock(&req_queue_mutex);
+    
+    return 1;
+}
+
+void rq_process(struct in_addr ipaddr, int ifindex) 
+{
+    RQ_ENTRY *cur_entry;
+    RQ_ENTRY *prev_entry = NULL;
+
+    pthread_mutex_lock(&arptab_mutex);
+    parseproc();
+    processarp(0);
+    pthread_mutex_unlock(&arptab_mutex);
+
+    pthread_mutex_lock(&req_queue_mutex);
+
+    cur_entry = req_queue;
+    
+    /* Walk through the list */
+    
+    while (cur_entry != NULL) {
+	if ( ipaddr.s_addr == *((long *) cur_entry->req_frame.arp.arp_tpa) && ifindex != cur_entry->req_if.sll_ifindex ) {
+
+	    if (debug)
+	        printf("Found %s in request queue\n", inet_ntoa(ipaddr));
+	    arp_reply(&cur_entry->req_frame, &cur_entry->req_if);
+
+	    /* Delete entry from the linked list */
+	    	    
+	    if (cur_entry == req_queue_tail)
+		req_queue_tail = prev_entry;
+	    
+	    if (prev_entry != NULL)
+		prev_entry->next = cur_entry->next;
+	    else
+		req_queue = cur_entry->next;
+		
+	    free(cur_entry);
+	    cur_entry = prev_entry;
+	
+	    req_queue_len--;
+
+	    pthread_mutex_unlock(&req_queue_mutex);
+	}
+
+	if (cur_entry != NULL) {
+    	    prev_entry = cur_entry;
+	    cur_entry = cur_entry->next;
+	}
+    }
+    
+    pthread_mutex_unlock(&req_queue_mutex);
+}
+
+
+void *arp(char *ifname) 
 {
   int sock,i;
   struct sockaddr_ll ifs;
@@ -223,7 +330,7 @@ void *arp(void *ifname)
   memset(ifr.ifr_name, 0, IFNAMSIZ);
   strncpy(ifr.ifr_name, (char *) ifname, IFNAMSIZ);
   if(ioctl(sock, SIOCGIFHWADDR, &ifr) < 0) {
-    syslog(LOG_ERR, "error: ioctl SIOCGIFHWADDR for %s: %s\n", (char *) ifname, sys_errlist[errno]);
+    syslog(LOG_ERR, "error: ioctl SIOCGIFHWADDR for %s: %s\n", (char *) ifname, strerror(errno));
     abort();
   }
 
@@ -231,7 +338,7 @@ void *arp(void *ifname)
   memcpy(ifs.sll_addr, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
 
   if(ioctl(sock, SIOCGIFINDEX, &ifr) < 0) {
-    syslog(LOG_ERR, "error: ioctl SIOCGIFINDEX for %s: %s", (char *) ifname, sys_errlist[errno]);
+    syslog(LOG_ERR, "error: ioctl SIOCGIFINDEX for %s: %s", (char *) ifname, strerror(errno));
     abort();
   }
 
@@ -256,19 +363,22 @@ void *arp(void *ifname)
 
     do {
       pthread_testcancel();
-      /* I just want to sleep a bit */
+      /* Sleep a bit in order not to overload the system */
       usleep(300);
 
       if (arp_recv(sock, &frame) <= 0)
     	    continue;
       /* Insert all the replies into ARP table */
       if (frame.arp.arp_op == ntohs(ARPOP_REPLY)) {
+
+    	  /* Received frame is an ARP reply */
+	  
 	  struct arpreq k_arpreq;
 	  int arpsock;
 	  struct sockaddr_in *sin;
 	  
 	  if ((arpsock = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		syslog(LOG_ERR, "error: ARP socket for %s: %s", (char *) ifname, sys_errlist[errno]);
+		syslog(LOG_ERR, "error: ARP socket for %s: %s", (char *) ifname, strerror(errno));
 	        continue;
 	  }
 	  
@@ -282,19 +392,25 @@ void *arp(void *ifname)
 	  k_arpreq.arp_pa.sa_family = AF_INET;
 	  sin = (struct sockaddr_in *) &k_arpreq.arp_pa;
 	  memcpy(&sin->sin_addr.s_addr, &frame.arp.arp_spa, sizeof(sin->sin_addr));
+
+	  /* Update kernel ARP table with the data from reply */
 	  
 	  if (debug)
-	      printf("Updating kernel ARP table for %s(%s).\n", inet_ntoa(sin->sin_addr), (char *) ifname);
+	      printf("Received reply: updating kernel ARP table for %s(%s).\n", inet_ntoa(sin->sin_addr), (char *) ifname);
 	  if (ioctl(arpsock, SIOCSARP, &k_arpreq) < 0) {
-		syslog(LOG_ERR, "error: ioctl SIOCSARP for %s(%s): %s", inet_ntoa(sin->sin_addr), (char *) ifname, sys_errlist[errno]);
+		syslog(LOG_ERR, "error: ioctl SIOCSARP for %s(%s): %s", inet_ntoa(sin->sin_addr), (char *) ifname, strerror(errno));
 		close(arpsock);
 	        continue;
 	  }
-	   
 	  close(arpsock);
+
+	  /* Check if reply is for one of the requests in request queue */
+	  rq_process(sin->sin_addr, ifs.sll_ifindex);
       }
     } while (frame.arp.arp_op != htons(ARPOP_REQUEST));
-    
+
+    /* Received frame is an ARP request */
+
     src = *((long *)frame.arp.arp_spa);
     dst = *((long *)frame.arp.arp_tpa);
     
@@ -303,23 +419,23 @@ void *arp(void *ifname)
     
     if (debug)
 	  printf("Received ARP request for %s on iface %s\n", inet_ntoa(dia), (char *) ifname);
-    /* Relay ARP request to all other interfaces */
-    for (i=0; i <= last_iface_idx; i++) {
-	if (strcmp(ifaces[i], ifname)) {
-	    arp_req(ifaces[i], dia);
-            /* send_dummy_udp(ifaces[i], dst); */
-	}
-    }
 
     pthread_mutex_lock(&arptab_mutex);
     if ( ipaddr_known(*arptab, dia, (char *) ifname) != 0 ) {
-      if (debug) {
-          printf("Replying to %s faking ", inet_ntoa(sia));
-	  printf("%s\n", inet_ntoa(dia));
-      }
-      arp_reply(sock, &frame, &ifs);
+      arp_reply(&frame, &ifs);
+    } else {
+    /* Relay the ARP request to all other interfaces */
+	for (i=0; i <= last_iface_idx; i++) {
+    	    if (strcmp(ifaces[i], ifname)) {
+		arp_req(ifaces[i], dia);
+	    }
+	}
+    /* Add the request to the request queue */
+	if (debug)
+    	    printf("Adding %s to request queue\n", inet_ntoa(sia));
+	rq_add(&frame, &ifs);
     }
     pthread_mutex_unlock(&arptab_mutex);
+    
   }
 }
-

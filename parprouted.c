@@ -22,6 +22,7 @@
 char *progname;
 int debug=0;
 int option_arpperm=0;
+static int perform_shutdown=0;
 
 char *errstr;
 
@@ -68,8 +69,10 @@ void processarp(int cleanup)
 
     while (cur_entry != NULL) {
 
-	if (cur_entry->tstamp-time(NULL) <= ARP_TABLE_ENTRY_TIMEOUT 
-	    && !cur_entry->route_added && !cleanup) 
+	if (cur_entry->tstamp - time(NULL) <= ARP_TABLE_ENTRY_TIMEOUT 
+	    && !cur_entry->route_added 
+	    && strcmp(cur_entry->ifname, "") != 0 
+	    && !cleanup) 
 	{
 
 	    /* added route to the kernel */
@@ -86,7 +89,9 @@ void processarp(int cleanup)
 	    cur_entry->route_added = 1;
 	    cur_entry = cur_entry->next;
 
-	} else if (cur_entry->tstamp-time(NULL) > ARP_TABLE_ENTRY_TIMEOUT || cleanup) {
+	} else if (cur_entry->tstamp - time(NULL) > ARP_TABLE_ENTRY_TIMEOUT 
+		    || strcmp(cur_entry->ifname, "") == 0
+		    || cleanup) {
 
 	    /* remove entry from arp table and remove route from kernel */
 	    if (snprintf(routecmd_str, ROUTE_CMD_LEN-1, 
@@ -124,7 +129,7 @@ void parseproc()
     ARPTAB_ENTRY *entry;
     char line[ARP_LINE_LEN];
     char *item;
-
+    
     /* Parse /proc/net/arp table */
         
     if ((arpf = fopen(PROC_ARP, "r")) == NULL) {
@@ -133,7 +138,7 @@ void parseproc()
     }
 
     firstline=1;
-    
+
     while (!feof(arpf)) {
 	
 	if (fgets(line, ARP_LINE_LEN, arpf) == NULL) {
@@ -145,37 +150,46 @@ void parseproc()
 	    }
 	} else {
 	    if (firstline) { firstline=0; continue; }
-	    
+	    	    
 	    /* Ignore incomplete ARP entries */
-
 	    if (strstr(line, "00:00:00:00:00:00") != NULL) 
+		continue;
+		
+	    /* ignore incomplete entries having flag 0x0 */
+	    if (strstr(line, "0x0") != NULL)
 		continue;
 	    
 	    item=strtok(line, " ");
-
-	    pthread_mutex_lock(&arptab_mutex);
 
 	    entry=findentry(item);
 	    
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN)
 		strncpy(entry->ipaddr, item, ARP_TABLE_ENTRY_LEN);
-	    else {
-    		    errstr = strerror(errno);
-		    syslog(LOG_INFO, "Error during ARP table parsing: %s", errstr);
-	    }
+	    else
+		syslog(LOG_INFO, "Error during ARP table parsing");
+
 	    if ((entry->ipaddr_ia.s_addr = inet_addr(entry->ipaddr)) == -1)
 		    syslog(LOG_INFO, "Error parsing IP address %s", entry->ipaddr);
 	    
-	    item=strtok(NULL, " "); item=strtok(NULL, " "); item=strtok(NULL, " ");
+	    /* Hardware type */
+	    item=strtok(NULL, " "); 
+	    
+	    /* flags */
+	    item=strtok(NULL, " "); 
+
+	    /* MAC address */	    
+	    item=strtok(NULL, " ");
 
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN)
 		strncpy(entry->hwaddr, item, ARP_TABLE_ENTRY_LEN);
-	    else {
-    		    errstr = strerror(errno);
-		    syslog(LOG_INFO, "Error during ARP table parsing: %s", errstr);
-	    }
+	    else 
+		syslog(LOG_INFO, "Error during ARP table parsing");
 
-	    item=strtok(NULL, " "); item=strtok(NULL, " ");
+	    /* Mask */
+	    item=strtok(NULL, " "); 
+
+	    /* Device */
+	    item=strtok(NULL, " ");
 	    if (item[strlen(item)-1] == '\n') { item[strlen(item)-1] = '\0'; }
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN) {
 		if (entry->route_added && !strcmp(item, entry->ifname))
@@ -185,18 +199,16 @@ void parseproc()
 		else 
 		    strncpy(entry->ifname, item, ARP_TABLE_ENTRY_LEN);
 	    } else {
-    		    errstr = strerror(errno);
-		    syslog(LOG_INFO, "Error during ARP table parsing: %s", errstr);
+		    syslog(LOG_INFO, "Error during ARP table parsing");
 	    }
 
 	    time(&entry->tstamp);
 	    
 	    if (debug &! entry->route_added) {
-	        printf("refresh entry: IPAddr: '%s' HWAddr: '%s' Dev: '%s'\n", 
+	        printf("add entry: IPAddr: '%s' HWAddr: '%s' Dev: '%s'\n", 
 		    entry->ipaddr, entry->hwaddr, entry->ifname);
 	    }
 
-	    pthread_mutex_unlock(&arptab_mutex);
 	}
     }
 
@@ -225,7 +237,7 @@ void cleanup()
 void sighandler()
 {
     /* FIXME: I think this is a wrong way to do it ... */
-    pthread_exit(NULL);
+    perform_shutdown=1;
 }
 
 void *main_thread()
@@ -240,9 +252,12 @@ void *main_thread()
     pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
     pthread_cleanup_push(cleanup, NULL);
     while (1) {
+	if (perform_shutdown) {
+	    pthread_exit(0);
+	}
 	pthread_testcancel();
-        parseproc();
         pthread_mutex_lock(&arptab_mutex);
+        parseproc();
         processarp(0);
 	pthread_mutex_unlock(&arptab_mutex);
 	usleep(SLEEPTIME);
@@ -251,7 +266,8 @@ void *main_thread()
 	    time(&last_refresh);
 	}
     }
-    pthread_cleanup_pop(1);
+    /* required since pthread_cleanup_* are implemented as macros */
+    pthread_cleanup_pop(0);
 }
     
 int main (int argc, char **argv)
@@ -322,9 +338,12 @@ int main (int argc, char **argv)
 
     }
 
-      
     openlog(progname, LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
     syslog(LOG_INFO, "Starting.");
+
+    signal(SIGINT, sighandler);
+    signal(SIGTERM, sighandler);
+    signal(SIGHUP, sighandler);
 
     if ((arptab = (ARPTAB_ENTRY **) malloc(sizeof(ARPTAB_ENTRY **))) == NULL) {
 	    errstr = strerror(errno);
@@ -333,17 +352,16 @@ int main (int argc, char **argv)
     
     *arptab = NULL;
 
+    pthread_mutex_init(&arptab_mutex, NULL);
+    pthread_mutex_init(&req_queue_mutex, NULL);
+    
     if (pthread_create(&my_threads[++last_thread_idx], NULL, main_thread, NULL)) {
 	syslog(LOG_ERR, "Error creating main thread.");
 	abort();
     }
 
-    signal(SIGINT, SIG_IGN);
-    signal(SIGTERM, SIG_IGN);
-    signal(SIGHUP, SIG_IGN);
-
     for (i=0; i <= last_iface_idx; i++) {
-	if (pthread_create(&my_threads[++last_thread_idx], NULL, arp, (void *) ifaces[i])) {
+	if (pthread_create(&my_threads[++last_thread_idx], NULL, (void *) arp, (void *) ifaces[i])) {
 	    syslog(LOG_ERR, "Error creating ARP thread for %s.",ifaces[i]);
 	    abort();
 	}
@@ -355,6 +373,6 @@ int main (int argc, char **argv)
 	abort();
     }
 
-    while (waitpid(-1, NULL, WNOHANG)) { }    
+    while (waitpid(-1, NULL, WNOHANG)) { }
     exit(1);     
 }

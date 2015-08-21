@@ -1,3 +1,10 @@
+Tue 06 Jan 2004 09:22:09 PM EET
+parprouted 0.50:
+Much improved performance and robustness. Request queue is now kept
+for all received ARP requests, ensuring that all new requests get answered
+quickly (around 60 ms in my test).
+
+------------------------------------------------------------------------
 Wed 18 Sep 2002 11:10:41 AM EEST
 parprouted 0.42:
 Fixed incorrect route installation using unfinished ARP entry.
