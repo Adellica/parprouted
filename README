@@ -1,0 +1,33 @@
+parprouted, (C) 2002 Vladimir Ivaschenko <vi@maks.net>
+-------------------------------------------------------
+
+1) About:
+
+parprouted is a daemon for transparent IP (Layer 3) proxy ARP bridging. 
+Unlike standard bridging, proxy ARP bridging allows to bridge Ethernet 
+networks behind wireless nodes. Normal L2 bridging does not work between 
+wireless nodes because wireless does not know about MAC addresses used 
+in the wired Ethernet networks.
+
+The daemon will check ARP table every second and add direct /32 routes to your
+kernel to the hosts learned via ARP. This way, your kernel will be able
+to route the packets to the destination host when it receives it and you will
+not have to care about setting routing/subnetting manually. All routes
+entered by the daemon will have a metric of 50. 
+
+2) Installation:
+
+parprouted requires "ip" program form iproute2 tools to be installed in 
+/sbin. If it is installed in another location, please replace "/sbin/ip" 
+occurances in the source with the correct path.
+
+In order for this daemon to work, you have to enable proxy ARP in your 
+kernel. You can do it like this:
+
+cat 1 > /proc/sys/net/conf/[interface]/proxy_arp
+
+You have to do it for each interface you want to bridging on.
+
+The daemon accept only one switch "-d", which stands for debugging. If you
+run it in debugging mode the daemon will go to background and will print
+additional debugging information to stdout/stderr.
