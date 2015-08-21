@@ -36,22 +36,39 @@ typedef struct _ether_arp_frame {
 
 int ipaddr_known(ARPTAB_ENTRY *list, struct in_addr addr, char *ifname) 
 {
-  while(list != NULL) {
+
+  while (list != NULL) {
     /* If we have this address in the table and ARP request comes from a 
        different interface, then we can reply */
-    if ( addr.s_addr == list->ipaddr_ia.s_addr && strcmp(ifname, list->ifname))
-      return 1;
+    if ( addr.s_addr == list->ipaddr_ia.s_addr && strcmp(ifname, list->ifname)) {
+	pthread_mutex_unlock(&arptab_mutex);
+        return 1;
+    }
     list = list->next;
   }
   
   if (debug)
       printf ("Did not find match for %s(%s)\n", inet_ntoa(addr), ifname);
+
   return 0;
 }
 
-void arp_recv(int sock, ether_arp_frame *frame) 
+int arp_recv(int sock, ether_arp_frame *frame) 
 {
-  recvfrom(sock, frame, sizeof(ether_arp_frame), 0, NULL, 0);
+    char packet[4096];
+    int nread;
+
+    memset(frame, 0, sizeof(ether_arp_frame));
+    
+    nread=recv(sock, &packet, sizeof(packet), 0);
+    
+    if (nread > sizeof(ether_arp_frame)) {
+	nread=sizeof(ether_arp_frame);
+    }
+    
+    memcpy(frame, &packet, nread); 
+
+    return nread;
 }
 
 /* Send ARP is-at reply */
@@ -173,6 +190,8 @@ void send_dummy_udp(char *ifname, u_int32_t remaddr) {
 
 void refresharp(ARPTAB_ENTRY *list)
 {
+  pthread_mutex_lock(&arptab_mutex);
+
   if (debug) 
       printf("Refreshing ARP entries.\n");
       
@@ -180,6 +199,8 @@ void refresharp(ARPTAB_ENTRY *list)
     arp_req(list->ifname, list->ipaddr_ia);
     list = list->next;
   }
+
+  pthread_mutex_unlock(&arptab_mutex);
 }
 
 void *arp(void *ifname) 
@@ -235,9 +256,11 @@ void *arp(void *ifname)
 
     do {
       pthread_testcancel();
-      /* I just want to sleep abit */
+      /* I just want to sleep a bit */
       usleep(300);
-      arp_recv(sock, &frame);
+
+      if (arp_recv(sock, &frame) <= 0)
+    	    continue;
       /* Insert all the replies into ARP table */
       if (frame.arp.arp_op == ntohs(ARPOP_REPLY)) {
 	  struct arpreq k_arpreq;
@@ -269,7 +292,7 @@ void *arp(void *ifname)
 	  }
 	   
 	  close(arpsock);
-      }	  
+      }
     } while (frame.arp.arp_op != htons(ARPOP_REQUEST));
     
     src = *((long *)frame.arp.arp_spa);
@@ -287,13 +310,16 @@ void *arp(void *ifname)
             /* send_dummy_udp(ifaces[i], dst); */
 	}
     }
-    if( ipaddr_known(*arptab, dia, (char *) ifname) != 0 ) {
+
+    pthread_mutex_lock(&arptab_mutex);
+    if ( ipaddr_known(*arptab, dia, (char *) ifname) != 0 ) {
       if (debug) {
           printf("Replying to %s faking ", inet_ntoa(sia));
 	  printf("%s\n", inet_ntoa(dia));
       }
       arp_reply(sock, &frame, &ifs);
     }
+    pthread_mutex_unlock(&arptab_mutex);
   }
 }
 

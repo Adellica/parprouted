@@ -1,13 +1,19 @@
+Wed 18 Sep 2002 11:10:41 AM EEST
+parprouted 0.42:
+Fixed incorrect route installation using unfinished ARP entry.
+More aggressive use of mutexes.
+
+------------------------------------------------------------------------
 Sun 07 Jul 2002 10:20:16 PM EEST
 
-parprbridge 0.4:
-refresh ARP entries by ARP pinging them. Or make permanent ARP
+parprouted 0.4:
+Refresh ARP entries by ARP pinging them. Or make permanent ARP
 entries if "-p" switch is given.
 
 ------------------------------------------------------------------------
 Sun 07 Jul 2002 12:51:36 AM EEST
 
-parpbridge 0.3:
+parprouted 0.3:
 Critical bugfix. Previous parprouted failed in networks of any 
 considerable complexity. Almost complete rewrite. parprouted now is 
 multithreaded and does  everything in userspace (including ARP relaying,

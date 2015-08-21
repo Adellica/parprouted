@@ -55,7 +55,7 @@ line.
 The daemon accepts the following switches:
 
 B<-d>, which stands for debugging. If you run it in debugging mode the daemon 
-will go to background and will print additional debugging information to 
+will not go to background and will print additional debugging information to 
 stdout/stderr.
 
 B<-p>, which makes all ARP entries to be permanent. This will also

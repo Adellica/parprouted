@@ -67,9 +67,11 @@ void processarp(int cleanup)
     char routecmd_str[ROUTE_CMD_LEN];
 
     while (cur_entry != NULL) {
+
 	if (cur_entry->tstamp-time(NULL) <= ARP_TABLE_ENTRY_TIMEOUT 
 	    && !cur_entry->route_added && !cleanup) 
 	{
+
 	    /* added route to the kernel */
 	    if (snprintf(routecmd_str, ROUTE_CMD_LEN-1, 
 		     "/sbin/ip route add %s/32 metric 50 dev %s scope link",
@@ -85,6 +87,7 @@ void processarp(int cleanup)
 	    cur_entry = cur_entry->next;
 
 	} else if (cur_entry->tstamp-time(NULL) > ARP_TABLE_ENTRY_TIMEOUT || cleanup) {
+
 	    /* remove entry from arp table and remove route from kernel */
 	    if (snprintf(routecmd_str, ROUTE_CMD_LEN-1, 
 		     "/sbin/ip route del %s/32 metric 50 dev %s scope link",
@@ -111,6 +114,7 @@ void processarp(int cleanup)
 	} /* if */
 
     } /* while loop */
+
 }	
 
 void parseproc()
@@ -142,9 +146,15 @@ void parseproc()
 	} else {
 	    if (firstline) { firstline=0; continue; }
 	    
+	    /* Ignore incomplete ARP entries */
+
+	    if (strstr(line, "00:00:00:00:00:00") != NULL) 
+		continue;
+	    
 	    item=strtok(line, " ");
 
 	    pthread_mutex_lock(&arptab_mutex);
+
 	    entry=findentry(item);
 	    
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN)
@@ -157,6 +167,7 @@ void parseproc()
 		    syslog(LOG_INFO, "Error parsing IP address %s", entry->ipaddr);
 	    
 	    item=strtok(NULL, " "); item=strtok(NULL, " "); item=strtok(NULL, " ");
+
 	    if (strlen(item) < ARP_TABLE_ENTRY_LEN)
 		strncpy(entry->hwaddr, item, ARP_TABLE_ENTRY_LEN);
 	    else {
@@ -231,7 +242,9 @@ void *main_thread()
     while (1) {
 	pthread_testcancel();
         parseproc();
+        pthread_mutex_lock(&arptab_mutex);
         processarp(0);
+	pthread_mutex_unlock(&arptab_mutex);
 	usleep(SLEEPTIME);
 	if (!option_arpperm && time(NULL)-last_refresh > REFRESHTIME) {
 	    refresharp(*arptab);
