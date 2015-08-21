@@ -36,12 +36,12 @@ int last_iface_idx=-1;
 ARPTAB_ENTRY **arptab;
 pthread_mutex_t arptab_mutex;
 
-ARPTAB_ENTRY * replace_entry(struct in_addr ipaddr) 
+ARPTAB_ENTRY * replace_entry(struct in_addr ipaddr, char *dev) 
 {
     ARPTAB_ENTRY * cur_entry=*arptab;
     ARPTAB_ENTRY * prev_entry=NULL;
-        
-    while (cur_entry != NULL && ipaddr.s_addr != cur_entry->ipaddr_ia.s_addr) {
+
+    while (cur_entry != NULL && ( ipaddr.s_addr != cur_entry->ipaddr_ia.s_addr || ( strncmp(cur_entry->ifname,dev,strlen(dev)) != 0 ) ) ) {
 	prev_entry = cur_entry;
 	cur_entry = cur_entry->next;
     };
@@ -90,7 +90,6 @@ void processarp(int cleanup)
 	    && !cur_entry->incomplete
 	    && !cleanup) 
 	{
-
 	    /* added route to the kernel */
 	    if (snprintf(routecmd_str, ROUTE_CMD_LEN-1, 
 		     "/sbin/ip route add %s/32 metric 50 dev %s scope link",
@@ -134,7 +133,7 @@ void processarp(int cleanup)
 	} else {
 	    cur_entry = cur_entry->next;
 	} /* if */
-
+	
     } /* while loop */
 
 }	
@@ -145,10 +144,10 @@ void parseproc()
     int firstline;
     ARPTAB_ENTRY *entry;
     char line[ARP_LINE_LEN];
-    char *item;
     struct in_addr ipaddr;
     int incomplete=0;
     int i;
+    char *ip, *mac, *dev, *hw, *flags, *mask;
     
     /* Parse /proc/net/arp table */
         
@@ -181,11 +180,11 @@ void parseproc()
 	    if (strstr(line, "0x0") != NULL)
 		incomplete=1;
 	    
-	    item=strtok(line, " ");
+	    ip=strtok(line, " ");
 
-	    if ((inet_aton(item, &ipaddr)) == -1)
-		    syslog(LOG_INFO, "Error parsing IP address %s", item);
-	    
+	    if ((inet_aton(ip, &ipaddr)) == -1)
+		    syslog(LOG_INFO, "Error parsing IP address %s", ip);
+			
 	    /* if IP address is marked as undiscovered and does not exist in arptab,
 	       send ARP request to all ifaces */
 
@@ -194,38 +193,40 @@ void parseproc()
 		    arp_req(ifaces[i], ipaddr);
 	    }
 
-	    entry=replace_entry(ipaddr);
+	    /* Hardware type */
+	    hw=strtok(NULL, " "); 
+	    
+	    /* flags */
+	    flags=strtok(NULL, " "); 
+
+	    /* MAC address */	    
+	    mac=strtok(NULL, " ");
+
+	    /* Mask */
+	    mask=strtok(NULL, " "); 
+
+	    /* Device */
+	    dev=strtok(NULL, " ");
+
+	    if (dev[strlen(dev)-1] == '\n') { dev[strlen(dev)-1] = '\0'; }
+
+	    entry=replace_entry(ipaddr, dev);
 	    entry->incomplete = incomplete;
 	    
 	    entry->ipaddr_ia.s_addr = ipaddr.s_addr;
-	    
-	    /* Hardware type */
-	    item=strtok(NULL, " "); 
-	    
-	    /* flags */
-	    item=strtok(NULL, " "); 
 
-	    /* MAC address */	    
-	    item=strtok(NULL, " ");
-
-	    if (strlen(item) < ARP_TABLE_ENTRY_LEN)
-		strncpy(entry->hwaddr, item, ARP_TABLE_ENTRY_LEN);
+	    if (strlen(mac) < ARP_TABLE_ENTRY_LEN)
+		strncpy(entry->hwaddr, mac, ARP_TABLE_ENTRY_LEN);
 	    else 
 		syslog(LOG_INFO, "Error during ARP table parsing");
-
-	    /* Mask */
-	    item=strtok(NULL, " "); 
-
-	    /* Device */
-	    item=strtok(NULL, " ");
-	    if (item[strlen(item)-1] == '\n') { item[strlen(item)-1] = '\0'; }
-	    if (strlen(item) < ARP_TABLE_ENTRY_LEN) {
-		if (entry->route_added && !strcmp(item, entry->ifname))
+	    
+	    if (strlen(dev) < ARP_TABLE_ENTRY_LEN) {
+		if (entry->route_added && !strcmp(dev, entry->ifname))
 		    /* Remove route from kernel if it already exists through
 		       a different interface */
 		    entry->tstamp=0;
 		else 
-		    strncpy(entry->ifname, item, ARP_TABLE_ENTRY_LEN);
+		    strncpy(entry->ifname, dev, ARP_TABLE_ENTRY_LEN);
 	    } else {
 		    syslog(LOG_INFO, "Error during ARP table parsing");
 	    }
