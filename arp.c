@@ -23,8 +23,32 @@
 #include <linux/if_packet.h>
 #include <netinet/if_ether.h>
 #include <sys/ioctl.h>
+#include <arpa/inet.h>
 
 #include "parprouted.h"
+
+
+// ===================
+/*
+ * Ethernet Address Resolution Protocol.
+ *
+ * See RFC 826 for protocol description.  Structure below is adapted
+ * to resolving internet addresses.  Field names used correspond to
+ * RFC 826.
+ */
+struct	ether_arp {
+	struct	arphdr ea_hdr;		/* fixed-size header */
+	u_int8_t arp_sha[ETH_ALEN];	/* sender hardware address */
+	u_int8_t arp_spa[4];		/* sender protocol address */
+	u_int8_t arp_tha[ETH_ALEN];	/* target hardware address */
+	u_int8_t arp_tpa[4];		/* target protocol address */
+};
+#define	arp_hrd	ea_hdr.ar_hrd
+#define	arp_pro	ea_hdr.ar_pro
+#define	arp_hln	ea_hdr.ar_hln
+#define	arp_pln	ea_hdr.ar_pln
+#define	arp_op	ea_hdr.ar_op
+// ===============
 
 typedef struct _ether_arp_frame { 
   struct ether_header ether_hdr;
@@ -318,8 +342,9 @@ void *arp(char *ifname)
   struct sockaddr_ll ifs;
   struct ifreq ifr;
 
-  pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-  pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+ /* TODO: FIXME properly (how should we do cancelling without pthread cancel support?) */
+  /* pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL); */
+  /* pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL); */
 
   sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
 
@@ -364,7 +389,7 @@ void *arp(char *ifname)
     struct in_addr dia;
 
     do {
-      pthread_testcancel();
+      //pthread_testcancel();
       /* Sleep a bit in order not to overload the system */
       usleep(300);
 
